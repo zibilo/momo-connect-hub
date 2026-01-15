@@ -1,1 +1,19 @@
 project_id = "frgeeutseqjzuddqdlls"
+
+[functions.mtn-deposit]
+verify_jwt = false
+
+[functions.mtn-withdraw]
+verify_jwt = false
+
+[functions.mtn-webhook-collection]
+verify_jwt = false
+
+[functions.mtn-webhook-disbursement]
+verify_jwt = false
+
+[functions.mtn-check-status]
+verify_jwt = false
+
+[functions.wallet-balance]
+verify_jwt = false
