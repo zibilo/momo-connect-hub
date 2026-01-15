@@ -1,9 +1,8 @@
-// MTN MoMo SDK for Congo-Brazzaville
+// MTN MoMo SDK for Sandbox Testing
 // Handles API User creation, API Key generation, OAuth tokens, and payment operations
 
-const MTN_ENV = Deno.env.get('MTN_ENV') || 'sandbox';
-const MTN_COUNTRY = 'CG';
-const MTN_CURRENCY = 'XAF';
+const MTN_ENV = 'sandbox' as const;
+const MTN_CURRENCY = 'EUR'; // Sandbox uses EUR
 
 // Sandbox URLs
 const SANDBOX_BASE_URL = 'https://sandbox.momodeveloper.mtn.com';
@@ -11,7 +10,8 @@ const SANDBOX_BASE_URL = 'https://sandbox.momodeveloper.mtn.com';
 // Production URLs (for future use)
 const PRODUCTION_BASE_URL = 'https://proxy.momoapi.mtn.com';
 
-const BASE_URL = MTN_ENV === 'production' ? PRODUCTION_BASE_URL : SANDBOX_BASE_URL;
+// Use sandbox for now
+const BASE_URL = SANDBOX_BASE_URL;
 
 interface TokenResponse {
   access_token: string;
@@ -180,25 +180,36 @@ async function getAccessToken(type: 'collections' | 'disbursements'): Promise<st
   return data.access_token;
 }
 
-// Format phone number for MTN (Congo-Brazzaville)
+// Format phone number for MTN Sandbox
+// In sandbox mode, use test number format: 46733123456
 function formatPhoneNumber(phone: string): string {
   // Remove all non-digits
-  let cleaned = phone.replace(/\D/g, '');
+  const cleaned = phone.replace(/\D/g, '');
   
-  // Remove country code if present
-  if (cleaned.startsWith('242')) {
-    cleaned = cleaned.substring(3);
-  } else if (cleaned.startsWith('00242')) {
-    cleaned = cleaned.substring(5);
+  // For sandbox, accept the test number format directly
+  // The sandbox uses Swedish test numbers like 46733123456
+  if (MTN_ENV === 'sandbox') {
+    // If it's already a valid sandbox number, use it
+    if (cleaned.length >= 10) {
+      return cleaned;
+    }
+    // Default sandbox test number
+    return '46733123456';
   }
   
-  // Ensure 9 digits for Congo-Brazzaville
-  if (cleaned.length !== 9) {
+  // Production: Congo-Brazzaville format
+  let productionPhone = cleaned;
+  if (productionPhone.startsWith('242')) {
+    productionPhone = productionPhone.substring(3);
+  } else if (productionPhone.startsWith('00242')) {
+    productionPhone = productionPhone.substring(5);
+  }
+  
+  if (productionPhone.length !== 9) {
     throw new Error('Invalid phone number format for Congo-Brazzaville. Expected 9 digits.');
   }
   
-  // Return with country code for MTN API
-  return `242${cleaned}`;
+  return `242${productionPhone}`;
 }
 
 // Request to Pay (Collections - Deposit)
