@@ -14,20 +14,20 @@ const PRODUCTION_BASE_URL = 'https://proxy.momoapi.mtn.com';
 const BASE_URL = SANDBOX_BASE_URL;
 
 interface TokenResponse {
-  access_token: string;
-  token_type: string;
-  expires_in: number;
+  access_token:  string;
+  token_type:  string;
+  expires_in:  number;
 }
 
 interface RequestToPayResponse {
   status: string;
-  financialTransactionId?: string;
-  externalId: string;
+  financialTransactionId?:  string;
+  externalId:  string;
   amount: string;
   currency: string;
-  payer: {
-    partyIdType: string;
-    partyId: string;
+  payer:  {
+    partyIdType:  string;
+    partyId:  string;
   };
   payerMessage?: string;
   payeeNote?: string;
@@ -40,9 +40,9 @@ interface TransferResponse {
   externalId: string;
   amount: string;
   currency: string;
-  payee: {
-    partyIdType: string;
-    partyId: string;
+  payee:  {
+    partyIdType:  string;
+    partyId:  string;
   };
   payerMessage?: string;
   payeeNote?: string;
@@ -55,150 +55,229 @@ let disbursementsToken: { token: string; expiresAt: number } | null = null;
 
 // API User and Key cache
 let collectionsApiCredentials: { apiUser: string; apiKey: string } | null = null;
-let disbursementsApiCredentials: { apiUser: string; apiKey: string } | null = null;
+let disbursementsApiCredentials: { apiUser:  string; apiKey: string } | null = null;
 
 function generateUUID(): string {
   return crypto.randomUUID();
 }
 
-// Create API User for sandbox environment
+/**
+ * Validate that required environment variables are configured
+ */
+function validateEnvironmentVariables(type: 'collections' | 'disbursements'): void {
+  const subscriptionKeyVar = type === 'collections' 
+    ? 'MTN_COLLECTIONS_SUBSCRIPTION_KEY' 
+    : 'MTN_DISBURSEMENTS_SUBSCRIPTION_KEY';
+  
+  const subscriptionKey = Deno.env.get(subscriptionKeyVar);
+  
+  if (!subscriptionKey) {
+    throw new Error(`Environment variable ${subscriptionKeyVar} is not configured.  Please set it in Supabase Edge Functions configuration.`);
+  }
+  
+  if (subscriptionKey.trim() === '') {
+    throw new Error(`Environment variable ${subscriptionKeyVar} is empty. Please configure it with a valid MTN subscription key.`);
+  }
+  
+  console.log(`✓ ${subscriptionKeyVar} is configured`);
+}
+
+/**
+ * Create API User for sandbox environment
+ */
 async function createApiUser(subscriptionKey: string, callbackHost: string): Promise<string> {
+  if (!subscriptionKey || subscriptionKey.trim() === '') {
+    throw new Error('Subscription key is required to create API User');
+  }
+
   const apiUser = generateUUID();
   
-  const response = await fetch(`${BASE_URL}/v1_0/apiuser`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Reference-Id': apiUser,
-      'Ocp-Apim-Subscription-Key': subscriptionKey,
-    },
-    body: JSON.stringify({
-      providerCallbackHost: callbackHost,
-    }),
-  });
+  console.log(`[MTN] Creating API User with ID: ${apiUser}`);
+  
+  try {
+    const response = await fetch(`${BASE_URL}/v1_0/apiuser`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Reference-Id': apiUser,
+        'Ocp-Apim-Subscription-Key': subscriptionKey,
+      },
+      body: JSON.stringify({
+        providerCallbackHost: callbackHost,
+      }),
+    });
 
-  if (!response.ok && response.status !== 201) {
-    const errorText = await response.text();
-    throw new Error(`Failed to create API User: ${response.status} - ${errorText}`);
+    if (!response.ok && response.status !== 201) {
+      const errorText = await response.text();
+      console.error(`[MTN] Failed to create API User: `, errorText);
+      throw new Error(`Failed to create API User: ${response. status} - ${errorText}`);
+    }
+
+    console.log(`[MTN] ✓ API User created successfully:  ${apiUser}`);
+    return apiUser;
+  } catch (error) {
+    console.error(`[MTN] Exception creating API User: `, error);
+    throw error;
   }
-
-  return apiUser;
 }
 
-// Create API Key for the API User
+/**
+ * Create API Key for the API User
+ */
 async function createApiKey(apiUser: string, subscriptionKey: string): Promise<string> {
-  const response = await fetch(`${BASE_URL}/v1_0/apiuser/${apiUser}/apikey`, {
-    method: 'POST',
-    headers: {
-      'Ocp-Apim-Subscription-Key': subscriptionKey,
-    },
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Failed to create API Key: ${response.status} - ${errorText}`);
+  if (!subscriptionKey || subscriptionKey.trim() === '') {
+    throw new Error('Subscription key is required to create API Key');
   }
 
-  const data = await response.json();
-  return data.apiKey;
+  console.log(`[MTN] Creating API Key for user: ${apiUser}`);
+  
+  try {
+    const response = await fetch(`${BASE_URL}/v1_0/apiuser/${apiUser}/apikey`, {
+      method: 'POST',
+      headers: {
+        'Ocp-Apim-Subscription-Key': subscriptionKey,
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[MTN] Failed to create API Key:`, errorText);
+      throw new Error(`Failed to create API Key: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    console.log(`[MTN] ✓ API Key created successfully`);
+    return data.apiKey;
+  } catch (error) {
+    console.error(`[MTN] Exception creating API Key: `, error);
+    throw error;
+  }
 }
 
-// Get or create API credentials
+/**
+ * Get or create API credentials
+ */
 async function getApiCredentials(
   type: 'collections' | 'disbursements'
-): Promise<{ apiUser: string; apiKey: string }> {
-  const cache = type === 'collections' ? collectionsApiCredentials : disbursementsApiCredentials;
-  
+): Promise<{ apiUser:  string; apiKey: string }> {
+  // Check cache first
+  const cache = type === 'collections' ?  collectionsApiCredentials : disbursementsApiCredentials;
   if (cache) {
+    console.log(`[MTN] Using cached ${type} API credentials`);
     return cache;
   }
 
+  // Validate environment variables
+  validateEnvironmentVariables(type);
+
   const subscriptionKey = type === 'collections' 
-    ? Deno.env.get('MTN_COLLECTIONS_SUBSCRIPTION_KEY')!
+    ?  Deno.env.get('MTN_COLLECTIONS_SUBSCRIPTION_KEY')!
     : Deno.env.get('MTN_DISBURSEMENTS_SUBSCRIPTION_KEY')!;
   
   const callbackHost = Deno.env.get('MTN_CALLBACK_HOST') || 'https://webhook.site';
 
-  const apiUser = await createApiUser(subscriptionKey, callbackHost);
-  const apiKey = await createApiKey(apiUser, subscriptionKey);
+  console.log(`[MTN] Creating new ${type} API credentials... `);
 
-  const credentials = { apiUser, apiKey };
+  try {
+    const apiUser = await createApiUser(subscriptionKey, callbackHost);
+    const apiKey = await createApiKey(apiUser, subscriptionKey);
 
-  if (type === 'collections') {
-    collectionsApiCredentials = credentials;
-  } else {
-    disbursementsApiCredentials = credentials;
+    const credentials = { apiUser, apiKey };
+
+    // Cache credentials
+    if (type === 'collections') {
+      collectionsApiCredentials = credentials;
+    } else {
+      disbursementsApiCredentials = credentials;
+    }
+
+    return credentials;
+  } catch (error) {
+    console.error(`[MTN] Failed to get API credentials for ${type}:`, error);
+    throw error;
   }
-
-  return credentials;
 }
 
-// Get OAuth token (with automatic renewal)
+/**
+ * Get OAuth token (with automatic renewal)
+ */
 async function getAccessToken(type: 'collections' | 'disbursements'): Promise<string> {
   const now = Date.now();
-  const cache = type === 'collections' ? collectionsToken : disbursementsToken;
+  const cache = type === 'collections' ?  collectionsToken : disbursementsToken;
   
   // Return cached token if still valid (with 30 second buffer)
   if (cache && cache.expiresAt > now + 30000) {
+    console.log(`[MTN] Using cached ${type} access token (expires in ${Math.round((cache.expiresAt - now) / 1000)}s)`);
     return cache.token;
   }
 
-  const credentials = await getApiCredentials(type);
-  const subscriptionKey = type === 'collections'
-    ? Deno.env.get('MTN_COLLECTIONS_SUBSCRIPTION_KEY')!
-    : Deno.env.get('MTN_DISBURSEMENTS_SUBSCRIPTION_KEY')!;
+  // Validate environment variables
+  validateEnvironmentVariables(type);
 
-  const basicAuth = btoa(`${credentials.apiUser}:${credentials.apiKey}`);
-  const endpoint = type === 'collections' ? 'collection' : 'disbursement';
+  console.log(`[MTN] Fetching new ${type} access token...`);
 
-  const response = await fetch(`${BASE_URL}/${endpoint}/token/`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Basic ${basicAuth}`,
-      'Ocp-Apim-Subscription-Key': subscriptionKey,
-    },
-  });
+  try {
+    const credentials = await getApiCredentials(type);
+    const subscriptionKey = type === 'collections'
+      ? Deno.env.get('MTN_COLLECTIONS_SUBSCRIPTION_KEY')!
+      : Deno.env. get('MTN_DISBURSEMENTS_SUBSCRIPTION_KEY')!;
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Failed to get access token: ${response.status} - ${errorText}`);
+    const basicAuth = btoa(`${credentials.apiUser}:${credentials.apiKey}`);
+    const endpoint = type === 'collections' ? 'collection' : 'disbursement';
+
+    console.log(`[MTN] Requesting token from ${BASE_URL}/${endpoint}/token/`);
+
+    const response = await fetch(`${BASE_URL}/${endpoint}/token/`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${basicAuth}`,
+        'Ocp-Apim-Subscription-Key': subscriptionKey,
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[MTN] Failed to get ${type} access token:`, response.status, errorText);
+      throw new Error(`Failed to get ${type} access token: ${response. status} - ${errorText}`);
+    }
+
+    const data:  TokenResponse = await response.json();
+    
+    const tokenData = {
+      token: data.access_token,
+      expiresAt: now + (data.expires_in * 1000),
+    };
+
+    // Cache token
+    if (type === 'collections') {
+      collectionsToken = tokenData;
+    } else {
+      disbursementsToken = tokenData;
+    }
+
+    console.log(`[MTN] ✓ ${type} access token obtained (expires in ${data.expires_in}s)`);
+    return data.access_token;
+  } catch (error) {
+    console.error(`[MTN] Exception getting ${type} access token:`, error);
+    throw error;
   }
-
-  const data: TokenResponse = await response.json();
-  
-  const tokenData = {
-    token: data.access_token,
-    expiresAt: now + (data.expires_in * 1000),
-  };
-
-  if (type === 'collections') {
-    collectionsToken = tokenData;
-  } else {
-    disbursementsToken = tokenData;
-  }
-
-  return data.access_token;
 }
 
-// Format phone number for MTN Sandbox
-// In sandbox mode, use test number format: 46733123456
+/**
+ * Format phone number for MTN Sandbox
+ * In sandbox mode, ALWAYS use test number:  46733123456
+ */
 function formatPhoneNumber(phone: string): string {
-  // Remove all non-digits
-  const cleaned = phone.replace(/\D/g, '');
-  
-  // For sandbox, accept the test number format directly
-  // The sandbox uses Swedish test numbers like 46733123456
+  // For sandbox, ALWAYS use the test number
   if (MTN_ENV === 'sandbox') {
-    // If it's already a valid sandbox number, use it
-    if (cleaned.length >= 10) {
-      return cleaned;
-    }
-    // Default sandbox test number
+    console.log(`[MTN] Sandbox mode: Using test phone number 46733123456 (input was: ${phone})`);
     return '46733123456';
   }
   
-  // Production: Congo-Brazzaville format
+  // Production:  Congo-Brazzaville format
+  const cleaned = phone.replace(/\D/g, '');
   let productionPhone = cleaned;
+  
   if (productionPhone.startsWith('242')) {
     productionPhone = productionPhone.substring(3);
   } else if (productionPhone.startsWith('00242')) {
@@ -206,81 +285,121 @@ function formatPhoneNumber(phone: string): string {
   }
   
   if (productionPhone.length !== 9) {
-    throw new Error('Invalid phone number format for Congo-Brazzaville. Expected 9 digits.');
+    throw new Error('Invalid phone number format for Congo-Brazzaville.  Expected 9 digits after country code.');
   }
   
-  return `242${productionPhone}`;
+  const formatted = `242${productionPhone}`;
+  console.log(`[MTN] Production mode:  Formatted phone number: ${formatted}`);
+  return formatted;
 }
 
-// Request to Pay (Collections - Deposit)
+/**
+ * Request to Pay (Collections - Deposit)
+ */
 export async function requestToPay(
   amount: number,
   phoneNumber: string,
   externalId: string,
-  payerMessage?: string,
+  payerMessage?:  string,
   payeeNote?: string
 ): Promise<{ referenceId: string }> {
-  const token = await getAccessToken('collections');
-  const subscriptionKey = Deno.env.get('MTN_COLLECTIONS_SUBSCRIPTION_KEY')!;
-  const referenceId = generateUUID();
-  const callbackUrl = Deno.env.get('MTN_CALLBACK_HOST');
+  try {
+    console.log(`[MTN] Starting requestToPay:  amount=${amount}, phone=${phoneNumber}, externalId=${externalId}`);
 
-  const formattedPhone = formatPhoneNumber(phoneNumber);
+    const token = await getAccessToken('collections');
+    const subscriptionKey = Deno. env.get('MTN_COLLECTIONS_SUBSCRIPTION_KEY');
+    
+    if (!subscriptionKey) {
+      throw new Error('MTN_COLLECTIONS_SUBSCRIPTION_KEY is not configured');
+    }
 
-  const response = await fetch(`${BASE_URL}/collection/v1_0/requesttopay`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'X-Reference-Id': referenceId,
-      'X-Target-Environment': MTN_ENV,
-      'Ocp-Apim-Subscription-Key': subscriptionKey,
-      'Content-Type': 'application/json',
-      ...(callbackUrl ? { 'X-Callback-Url': `${callbackUrl}/webhooks/mtn/collection` } : {}),
-    },
-    body: JSON.stringify({
-      amount: amount.toString(),
+    const referenceId = generateUUID();
+    const callbackUrl = Deno.env.get('MTN_CALLBACK_HOST');
+    const formattedPhone = formatPhoneNumber(phoneNumber);
+
+    const requestBody = {
+      amount:  amount.toString(),
       currency: MTN_CURRENCY,
       externalId,
       payer: {
         partyIdType: 'MSISDN',
         partyId: formattedPhone,
       },
-      payerMessage: payerMessage || 'Dépôt sur votre portefeuille',
+      payerMessage:  payerMessage || 'Dépôt sur votre portefeuille',
       payeeNote: payeeNote || 'Dépôt wallet',
-    }),
-  });
+    };
 
-  if (!response.ok && response.status !== 202) {
-    const errorText = await response.text();
-    throw new Error(`Request to Pay failed: ${response.status} - ${errorText}`);
+    console.log(`[MTN] Sending request to ${BASE_URL}/collection/v1_0/requesttopay`);
+    console.log(`[MTN] Request body: `, JSON.stringify(requestBody, null, 2));
+
+    const response = await fetch(`${BASE_URL}/collection/v1_0/requesttopay`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'X-Reference-Id': referenceId,
+        'X-Target-Environment': MTN_ENV,
+        'Ocp-Apim-Subscription-Key': subscriptionKey,
+        'Content-Type': 'application/json',
+        .. .(callbackUrl ?  { 'X-Callback-Url': `${callbackUrl}/webhooks/mtn/collection` } : {}),
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok && response.status !== 202) {
+      const errorText = await response.text();
+      console.error(`[MTN] Request to Pay failed:  ${response.status}`, errorText);
+      throw new Error(`Request to Pay failed: ${response.status} - ${errorText}`);
+    }
+
+    console.log(`[MTN] ✓ Request to Pay sent successfully with referenceId: ${referenceId}`);
+    return { referenceId };
+  } catch (error) {
+    console.error(`[MTN] Exception in requestToPay:`, error);
+    throw error;
   }
-
-  return { referenceId };
 }
 
-// Get Request to Pay Status
+/**
+ * Get Request to Pay Status
+ */
 export async function getRequestToPayStatus(referenceId: string): Promise<RequestToPayResponse> {
-  const token = await getAccessToken('collections');
-  const subscriptionKey = Deno.env.get('MTN_COLLECTIONS_SUBSCRIPTION_KEY')!;
+  try {
+    console.log(`[MTN] Getting status for referenceId: ${referenceId}`);
 
-  const response = await fetch(`${BASE_URL}/collection/v1_0/requesttopay/${referenceId}`, {
-    method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'X-Target-Environment': MTN_ENV,
-      'Ocp-Apim-Subscription-Key': subscriptionKey,
-    },
-  });
+    const token = await getAccessToken('collections');
+    const subscriptionKey = Deno.env.get('MTN_COLLECTIONS_SUBSCRIPTION_KEY');
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Failed to get payment status: ${response.status} - ${errorText}`);
+    if (!subscriptionKey) {
+      throw new Error('MTN_COLLECTIONS_SUBSCRIPTION_KEY is not configured');
+    }
+
+    const response = await fetch(`${BASE_URL}/collection/v1_0/requesttopay/${referenceId}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'X-Target-Environment': MTN_ENV,
+        'Ocp-Apim-Subscription-Key':  subscriptionKey,
+      },
+    });
+
+    if (!response. ok) {
+      const errorText = await response.text();
+      console.error(`[MTN] Failed to get payment status: `, response.status, errorText);
+      throw new Error(`Failed to get payment status: ${response.status} - ${errorText}`);
+    }
+
+    const status = await response.json();
+    console.log(`[MTN] ✓ Payment status retrieved: `, JSON.stringify(status, null, 2));
+    return status;
+  } catch (error) {
+    console.error(`[MTN] Exception in getRequestToPayStatus:`, error);
+    throw error;
   }
-
-  return await response.json();
 }
 
-// Transfer (Disbursements - Withdrawal)
+/**
+ * Transfer (Disbursements - Withdrawal)
+ */
 export async function transfer(
   amount: number,
   phoneNumber: string,
@@ -288,25 +407,22 @@ export async function transfer(
   payerMessage?: string,
   payeeNote?: string
 ): Promise<{ referenceId: string }> {
-  const token = await getAccessToken('disbursements');
-  const subscriptionKey = Deno.env.get('MTN_DISBURSEMENTS_SUBSCRIPTION_KEY')!;
-  const referenceId = generateUUID();
-  const callbackUrl = Deno.env.get('MTN_CALLBACK_HOST');
+  try {
+    console.log(`[MTN] Starting transfer: amount=${amount}, phone=${phoneNumber}, externalId=${externalId}`);
 
-  const formattedPhone = formatPhoneNumber(phoneNumber);
+    const token = await getAccessToken('disbursements');
+    const subscriptionKey = Deno.env. get('MTN_DISBURSEMENTS_SUBSCRIPTION_KEY');
+    
+    if (!subscriptionKey) {
+      throw new Error('MTN_DISBURSEMENTS_SUBSCRIPTION_KEY is not configured');
+    }
 
-  const response = await fetch(`${BASE_URL}/disbursement/v1_0/transfer`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'X-Reference-Id': referenceId,
-      'X-Target-Environment': MTN_ENV,
-      'Ocp-Apim-Subscription-Key': subscriptionKey,
-      'Content-Type': 'application/json',
-      ...(callbackUrl ? { 'X-Callback-Url': `${callbackUrl}/webhooks/mtn/disbursement` } : {}),
-    },
-    body: JSON.stringify({
-      amount: amount.toString(),
+    const referenceId = generateUUID();
+    const callbackUrl = Deno.env.get('MTN_CALLBACK_HOST');
+    const formattedPhone = formatPhoneNumber(phoneNumber);
+
+    const requestBody = {
+      amount:  amount.toString(),
       currency: MTN_CURRENCY,
       externalId,
       payee: {
@@ -315,83 +431,153 @@ export async function transfer(
       },
       payerMessage: payerMessage || 'Retrait de votre portefeuille',
       payeeNote: payeeNote || 'Retrait wallet',
-    }),
-  });
+    };
 
-  if (!response.ok && response.status !== 202) {
-    const errorText = await response.text();
-    throw new Error(`Transfer failed: ${response.status} - ${errorText}`);
+    console. log(`[MTN] Sending transfer to ${BASE_URL}/disbursement/v1_0/transfer`);
+    console.log(`[MTN] Request body:`, JSON.stringify(requestBody, null, 2));
+
+    const response = await fetch(`${BASE_URL}/disbursement/v1_0/transfer`, {
+      method: 'POST',
+      headers:  {
+        'Authorization': `Bearer ${token}`,
+        'X-Reference-Id': referenceId,
+        'X-Target-Environment': MTN_ENV,
+        'Ocp-Apim-Subscription-Key': subscriptionKey,
+        'Content-Type': 'application/json',
+        ...(callbackUrl ? { 'X-Callback-Url': `${callbackUrl}/webhooks/mtn/disbursement` } : {}),
+      },
+      body: JSON. stringify(requestBody),
+    });
+
+    if (!response.ok && response.status !== 202) {
+      const errorText = await response.text();
+      console.error(`[MTN] Transfer failed: `, response.status, errorText);
+      throw new Error(`Transfer failed: ${response.status} - ${errorText}`);
+    }
+
+    console.log(`[MTN] ✓ Transfer sent successfully with referenceId:  ${referenceId}`);
+    return { referenceId };
+  } catch (error) {
+    console.error(`[MTN] Exception in transfer:`, error);
+    throw error;
   }
-
-  return { referenceId };
 }
 
-// Get Transfer Status
+/**
+ * Get Transfer Status
+ */
 export async function getTransferStatus(referenceId: string): Promise<TransferResponse> {
-  const token = await getAccessToken('disbursements');
-  const subscriptionKey = Deno.env.get('MTN_DISBURSEMENTS_SUBSCRIPTION_KEY')!;
+  try {
+    console.log(`[MTN] Getting transfer status for referenceId:  ${referenceId}`);
 
-  const response = await fetch(`${BASE_URL}/disbursement/v1_0/transfer/${referenceId}`, {
-    method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'X-Target-Environment': MTN_ENV,
-      'Ocp-Apim-Subscription-Key': subscriptionKey,
-    },
-  });
+    const token = await getAccessToken('disbursements');
+    const subscriptionKey = Deno.env.get('MTN_DISBURSEMENTS_SUBSCRIPTION_KEY');
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Failed to get transfer status: ${response.status} - ${errorText}`);
-  }
+    if (!subscriptionKey) {
+      throw new Error('MTN_DISBURSEMENTS_SUBSCRIPTION_KEY is not configured');
+    }
 
-  return await response.json();
-}
-
-// Get Collections Account Balance
-export async function getCollectionsBalance(): Promise<{ availableBalance: string; currency: string }> {
-  const token = await getAccessToken('collections');
-  const subscriptionKey = Deno.env.get('MTN_COLLECTIONS_SUBSCRIPTION_KEY')!;
-
-  const response = await fetch(`${BASE_URL}/collection/v1_0/account/balance`, {
-    method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'X-Target-Environment': MTN_ENV,
-      'Ocp-Apim-Subscription-Key': subscriptionKey,
-    },
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Failed to get balance: ${response.status} - ${errorText}`);
-  }
-
-  return await response.json();
-}
-
-// Validate account holder
-export async function validateAccountHolder(phoneNumber: string): Promise<boolean> {
-  const token = await getAccessToken('collections');
-  const subscriptionKey = Deno.env.get('MTN_COLLECTIONS_SUBSCRIPTION_KEY')!;
-  const formattedPhone = formatPhoneNumber(phoneNumber);
-
-  const response = await fetch(
-    `${BASE_URL}/collection/v1_0/accountholder/msisdn/${formattedPhone}/active`,
-    {
+    const response = await fetch(`${BASE_URL}/disbursement/v1_0/transfer/${referenceId}`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,
         'X-Target-Environment': MTN_ENV,
         'Ocp-Apim-Subscription-Key': subscriptionKey,
       },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[MTN] Failed to get transfer status:`, response.status, errorText);
+      throw new Error(`Failed to get transfer status: ${response.status} - ${errorText}`);
     }
-  );
 
-  if (response.status === 200) {
-    const data = await response.json();
-    return data.result === true;
+    const status = await response.json();
+    console.log(`[MTN] ✓ Transfer status retrieved:`, JSON.stringify(status, null, 2));
+    return status;
+  } catch (error) {
+    console.error(`[MTN] Exception in getTransferStatus:`, error);
+    throw error;
   }
+}
 
-  return false;
+/**
+ * Get Collections Account Balance
+ */
+export async function getCollectionsBalance(): Promise<{ availableBalance: string; currency: string }> {
+  try {
+    console.log(`[MTN] Getting collections account balance... `);
+
+    const token = await getAccessToken('collections');
+    const subscriptionKey = Deno.env.get('MTN_COLLECTIONS_SUBSCRIPTION_KEY');
+
+    if (!subscriptionKey) {
+      throw new Error('MTN_COLLECTIONS_SUBSCRIPTION_KEY is not configured');
+    }
+
+    const response = await fetch(`${BASE_URL}/collection/v1_0/account/balance`, {
+      method: 'GET',
+      headers:  {
+        'Authorization': `Bearer ${token}`,
+        'X-Target-Environment': MTN_ENV,
+        'Ocp-Apim-Subscription-Key': subscriptionKey,
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[MTN] Failed to get balance:`, response.status, errorText);
+      throw new Error(`Failed to get balance: ${response.status} - ${errorText}`);
+    }
+
+    const balance = await response.json();
+    console.log(`[MTN] ✓ Balance retrieved:`, JSON.stringify(balance, null, 2));
+    return balance;
+  } catch (error) {
+    console.error(`[MTN] Exception in getCollectionsBalance:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Validate account holder
+ */
+export async function validateAccountHolder(phoneNumber: string): Promise<boolean> {
+  try {
+    console.log(`[MTN] Validating account holder: ${phoneNumber}`);
+
+    const token = await getAccessToken('collections');
+    const subscriptionKey = Deno.env.get('MTN_COLLECTIONS_SUBSCRIPTION_KEY');
+
+    if (!subscriptionKey) {
+      throw new Error('MTN_COLLECTIONS_SUBSCRIPTION_KEY is not configured');
+    }
+
+    const formattedPhone = formatPhoneNumber(phoneNumber);
+
+    const response = await fetch(
+      `${BASE_URL}/collection/v1_0/accountholder/msisdn/${formattedPhone}/active`,
+      {
+        method: 'GET',
+        headers:  {
+          'Authorization': `Bearer ${token}`,
+          'X-Target-Environment': MTN_ENV,
+          'Ocp-Apim-Subscription-Key': subscriptionKey,
+        },
+      }
+    );
+
+    if (response.status === 200) {
+      const data = await response.json();
+      const isActive = data.result === true;
+      console.log(`[MTN] ✓ Account holder validation result: ${isActive}`);
+      return isActive;
+    }
+
+    console.log(`[MTN] Account holder validation returned status: ${response.status}`);
+    return false;
+  } catch (error) {
+    console.error(`[MTN] Exception in validateAccountHolder:`, error);
+    throw error;
+  }
 }
