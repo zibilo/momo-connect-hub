@@ -30,11 +30,15 @@ export const DepositDialog = ({ onDeposit }: DepositDialogProps) => {
       return;
     }
 
-    if (!phoneNumber.match(/^(\+?242)?0?[0-9]{9}$/)) {
+    // Accept Congo numbers OR sandbox test numbers (46733123456)
+    const isCongoNumber = phoneNumber.match(/^(\+?242)?0?[0-9]{9}$/);
+    const isSandboxNumber = phoneNumber.match(/^46[0-9]{9}$/);
+    
+    if (!isCongoNumber && !isSandboxNumber) {
       toast({
         variant: 'destructive',
         title: 'Numéro invalide',
-        description: 'Entrez un numéro MTN MoMo valide (Congo-Brazzaville)',
+        description: 'Entrez un numéro MTN MoMo valide',
       });
       return;
     }
@@ -99,7 +103,7 @@ export const DepositDialog = ({ onDeposit }: DepositDialogProps) => {
               <Input
                 id="phone"
                 type="tel"
-                placeholder="+242 06 XXX XX XX"
+                placeholder="46733123456"
                 value={phoneNumber}
                 onChange={(e) => setPhoneNumber(e.target.value)}
                 className="pl-10"
@@ -107,7 +111,7 @@ export const DepositDialog = ({ onDeposit }: DepositDialogProps) => {
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              Format: +242XXXXXXXXX ou 06XXXXXXX
+              Sandbox: 46733123456 | Production: +242XXXXXXXXX
             </p>
           </div>
           <DialogFooter>
