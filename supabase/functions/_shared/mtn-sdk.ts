@@ -191,9 +191,12 @@ async function getApiCredentials(
     ?  Deno.env.get('MTN_COLLECTIONS_SUBSCRIPTION_KEY')!
     : Deno.env.get('MTN_DISBURSEMENTS_SUBSCRIPTION_KEY')!;
   
-  const callbackHost = Deno.env.get('MTN_CALLBACK_HOST') || 'https://webhook.site';
+  // Sanitize callback host - remove any accidental spaces
+  const rawCallbackHost = Deno.env.get('MTN_CALLBACK_HOST') || 'https://webhook.site';
+  const callbackHost = rawCallbackHost.replace(/\s+/g, '');
 
   console.log(`[MTN] Creating new ${type} API credentials... `);
+  console.log(`[MTN] Sanitized callback host: ${callbackHost}`);
 
   try {
     const apiUser = await createApiUser(subscriptionKey, callbackHost);
@@ -331,7 +334,9 @@ export async function requestToPay(
     }
 
     const referenceId = generateUUID();
-    const callbackUrl = Deno.env.get('MTN_CALLBACK_HOST');
+    // Sanitize callback URL - remove any accidental spaces
+    const rawCallbackUrl = Deno.env.get('MTN_CALLBACK_HOST');
+    const callbackUrl = rawCallbackUrl ? rawCallbackUrl.replace(/\s+/g, '') : undefined;
     const formattedPhone = formatPhoneNumber(phoneNumber);
 
     const requestBody = {
@@ -442,7 +447,9 @@ export async function transfer(
     }
 
     const referenceId = generateUUID();
-    const callbackUrl = Deno.env.get('MTN_CALLBACK_HOST');
+    // Sanitize callback URL - remove any accidental spaces
+    const rawCallbackUrl = Deno.env.get('MTN_CALLBACK_HOST');
+    const callbackUrl = rawCallbackUrl ? rawCallbackUrl.replace(/\s+/g, '') : undefined;
     const formattedPhone = formatPhoneNumber(phoneNumber);
 
     const requestBody = {
