@@ -1,9 +1,12 @@
+import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { ArrowDownLeft, ArrowUpRight, Clock, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, Clock, CheckCircle, XCircle, Loader2, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
+import { toast } from 'sonner';
 
 interface Transaction {
   id: string;
@@ -18,6 +21,7 @@ interface Transaction {
 interface TransactionListProps {
   transactions: Transaction[];
   loading?: boolean;
+  onCheckStatus?: (transactionId: string) => Promise<any>;
 }
 
 const statusConfig = {
@@ -28,9 +32,31 @@ const statusConfig = {
   cancelled: { label: 'Annulé', variant: 'outline' as const, icon: XCircle },
 };
 
-export const TransactionList = ({ transactions, loading }: TransactionListProps) => {
+export const TransactionList = ({ transactions, loading, onCheckStatus }: TransactionListProps) => {
+  const [checkingId, setCheckingId] = useState<string | null>(null);
+
   const formatAmount = (amount: number) => {
     return new Intl.NumberFormat('fr-FR').format(amount);
+  };
+
+  const handleCheckStatus = async (transactionId: string) => {
+    if (!onCheckStatus) return;
+    
+    setCheckingId(transactionId);
+    try {
+      const result = await onCheckStatus(transactionId);
+      if (result.status === 'successful') {
+        toast.success('Transaction confirmée! Votre solde a été mis à jour.');
+      } else if (result.status === 'failed') {
+        toast.error(result.error || 'La transaction a échoué.');
+      } else {
+        toast.info('Transaction toujours en cours de traitement.');
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'Erreur lors de la vérification');
+    } finally {
+      setCheckingId(null);
+    }
   };
 
   if (loading) {
@@ -75,6 +101,8 @@ export const TransactionList = ({ transactions, loading }: TransactionListProps)
               const status = statusConfig[tx.status];
               const StatusIcon = status.icon;
               const isDeposit = tx.type === 'deposit';
+              const canCheckStatus = (tx.status === 'pending' || tx.status === 'processing') && onCheckStatus;
+              const isChecking = checkingId === tx.id;
 
               return (
                 <div key={tx.id} className="flex items-center gap-4 p-4">
@@ -106,8 +134,26 @@ export const TransactionList = ({ transactions, loading }: TransactionListProps)
                       <p className="text-xs text-destructive mt-1">{tx.error_message}</p>
                     )}
                   </div>
-                  <div className={`text-right font-semibold ${isDeposit ? 'text-green-600' : 'text-orange-600'}`}>
-                    {isDeposit ? '+' : '-'}{formatAmount(tx.amount)} XAF
+                  <div className="flex items-center gap-2">
+                    {canCheckStatus && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleCheckStatus(tx.id)}
+                        disabled={isChecking}
+                        className="h-8 px-2"
+                      >
+                        {isChecking ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" />
+                        )}
+                        <span className="ml-1 hidden sm:inline">Vérifier</span>
+                      </Button>
+                    )}
+                    <div className={`text-right font-semibold ${isDeposit ? 'text-green-600' : 'text-orange-600'}`}>
+                      {isDeposit ? '+' : '-'}{formatAmount(tx.amount)} XAF
+                    </div>
                   </div>
                 </div>
               );

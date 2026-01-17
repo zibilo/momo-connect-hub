@@ -10,7 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 
 const Dashboard = () => {
   const { user, signOut } = useAuth();
-  const { wallet, transactions, loading, deposit, withdraw, refresh } = useWallet();
+  const { wallet, transactions, loading, deposit, withdraw, checkTransactionStatus, refresh } = useWallet();
   const { toast } = useToast();
 
   const handleSignOut = async () => {
@@ -71,7 +71,11 @@ const Dashboard = () => {
           </div>
 
           {/* Transactions */}
-          <TransactionList transactions={transactions} loading={loading} />
+          <TransactionList 
+            transactions={transactions} 
+            loading={loading} 
+            onCheckStatus={checkTransactionStatus}
+          />
         </div>
       </main>
     </div>
