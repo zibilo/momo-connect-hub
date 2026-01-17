@@ -106,6 +106,30 @@ export const useWallet = () => {
     return data;
   };
 
+  const checkTransactionStatus = async (transactionId: string) => {
+    if (!session?.access_token) throw new Error('Non authentifié');
+
+    const response = await fetch(
+      `https://frgeeutseqjzuddqdlls.supabase.co/functions/v1/mtn-check-status`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ transaction_id: transactionId }),
+      }
+    );
+
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Erreur lors de la vérification');
+    
+    // Refresh data after checking status
+    await fetchWallet();
+    await fetchTransactions();
+    return data;
+  };
+
   useEffect(() => {
     if (user) {
       setLoading(true);
@@ -122,6 +146,7 @@ export const useWallet = () => {
     error,
     deposit,
     withdraw,
+    checkTransactionStatus,
     refresh: () => Promise.all([fetchWallet(), fetchTransactions()]),
   };
 };
