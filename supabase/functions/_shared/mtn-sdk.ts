@@ -354,25 +354,39 @@ export async function requestToPay(
     console.log(`[MTN] Sending request to ${BASE_URL}/collection/v1_0/requesttopay`);
     console.log(`[MTN] Request body: `, JSON.stringify(requestBody, null, 2));
 
+    // For sandbox, don't send X-Callback-Url - it must match exactly what was set in API User creation
+    // Sandbox doesn't require callbacks, we'll poll for status instead
+    const headers: Record<string, string> = {
+      'Authorization': `Bearer ${token}`,
+      'X-Reference-Id': referenceId,
+      'X-Target-Environment': MTN_ENV,
+      'Ocp-Apim-Subscription-Key': subscriptionKey,
+      'Content-Type': 'application/json',
+    };
+
+    // Only add callback URL in production mode and if it matches the configured host
+    if (MTN_ENV !== 'sandbox' && callbackUrl) {
+      headers['X-Callback-Url'] = `${callbackUrl}/mtn-webhook-collection`;
+    }
+
+    console.log(`[MTN] Request headers (without auth):`, JSON.stringify({
+      'X-Reference-Id': referenceId,
+      'X-Target-Environment': MTN_ENV,
+      'Has-Callback': !!headers['X-Callback-Url'],
+    }));
+
     const response = await fetch(`${BASE_URL}/collection/v1_0/requesttopay`, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'X-Reference-Id': referenceId,
-        'X-Target-Environment': MTN_ENV,
-        'Ocp-Apim-Subscription-Key': subscriptionKey,
-        'Content-Type': 'application/json',
-        ...(callbackUrl ? { 'X-Callback-Url': `${callbackUrl}/webhooks/mtn/collection` } : {}),
-      },
+      headers,
       body: JSON.stringify(requestBody),
     });
 
     console.log(`[MTN] Request to Pay response status: ${response.status} ${response.statusText}`);
     
     // Log response headers for debugging
-    const headers: Record<string, string> = {};
-    response.headers.forEach((value, key) => { headers[key] = value; });
-    console.log(`[MTN] Response headers:`, JSON.stringify(headers));
+    const responseHeaders: Record<string, string> = {};
+    response.headers.forEach((value, key) => { responseHeaders[key] = value; });
+    console.log(`[MTN] Response headers:`, JSON.stringify(responseHeaders));
 
     if (!response.ok && response.status !== 202) {
       const errorText = await response.text();
@@ -464,20 +478,27 @@ export async function transfer(
       payeeNote: payeeNote || 'Retrait wallet',
     };
 
-    console. log(`[MTN] Sending transfer to ${BASE_URL}/disbursement/v1_0/transfer`);
+    console.log(`[MTN] Sending transfer to ${BASE_URL}/disbursement/v1_0/transfer`);
     console.log(`[MTN] Request body:`, JSON.stringify(requestBody, null, 2));
+
+    // For sandbox, don't send X-Callback-Url - it must match exactly what was set in API User creation
+    const transferHeaders: Record<string, string> = {
+      'Authorization': `Bearer ${token}`,
+      'X-Reference-Id': referenceId,
+      'X-Target-Environment': MTN_ENV,
+      'Ocp-Apim-Subscription-Key': subscriptionKey,
+      'Content-Type': 'application/json',
+    };
+
+    // Only add callback URL in production mode
+    if (MTN_ENV !== 'sandbox' && callbackUrl) {
+      transferHeaders['X-Callback-Url'] = `${callbackUrl}/mtn-webhook-disbursement`;
+    }
 
     const response = await fetch(`${BASE_URL}/disbursement/v1_0/transfer`, {
       method: 'POST',
-      headers:  {
-        'Authorization': `Bearer ${token}`,
-        'X-Reference-Id': referenceId,
-        'X-Target-Environment': MTN_ENV,
-        'Ocp-Apim-Subscription-Key': subscriptionKey,
-        'Content-Type': 'application/json',
-        ...(callbackUrl ? { 'X-Callback-Url': `${callbackUrl}/webhooks/mtn/disbursement` } : {}),
-      },
-      body: JSON. stringify(requestBody),
+      headers: transferHeaders,
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok && response.status !== 202) {
