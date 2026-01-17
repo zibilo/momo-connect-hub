@@ -93,9 +93,14 @@ async function createApiUser(subscriptionKey: string, callbackHost: string): Pro
   const apiUser = generateUUID();
   
   console.log(`[MTN] Creating API User with ID: ${apiUser}`);
+  console.log(`[MTN] Using subscription key (first 8 chars): ${subscriptionKey.substring(0, 8)}...`);
+  console.log(`[MTN] Callback host: ${callbackHost}`);
   
   try {
-    const response = await fetch(`${BASE_URL}/v1_0/apiuser`, {
+    const url = `${BASE_URL}/v1_0/apiuser`;
+    console.log(`[MTN] POST ${url}`);
+    
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -107,16 +112,23 @@ async function createApiUser(subscriptionKey: string, callbackHost: string): Pro
       }),
     });
 
+    console.log(`[MTN] Response status: ${response.status} ${response.statusText}`);
+    
+    // Log response headers for debugging
+    const headers: Record<string, string> = {};
+    response.headers.forEach((value, key) => { headers[key] = value; });
+    console.log(`[MTN] Response headers:`, JSON.stringify(headers));
+
     if (!response.ok && response.status !== 201) {
       const errorText = await response.text();
-      console.error(`[MTN] Failed to create API User: `, errorText);
-      throw new Error(`Failed to create API User: ${response. status} - ${errorText}`);
+      console.error(`[MTN] Failed to create API User. Status: ${response.status}, Body: "${errorText}"`);
+      throw new Error(`Failed to create API User: ${response.status} - ${errorText || 'Empty response'}`);
     }
 
-    console.log(`[MTN] ✓ API User created successfully:  ${apiUser}`);
+    console.log(`[MTN] ✓ API User created successfully: ${apiUser}`);
     return apiUser;
   } catch (error) {
-    console.error(`[MTN] Exception creating API User: `, error);
+    console.error(`[MTN] Exception creating API User:`, error);
     throw error;
   }
 }
@@ -132,24 +144,29 @@ async function createApiKey(apiUser: string, subscriptionKey: string): Promise<s
   console.log(`[MTN] Creating API Key for user: ${apiUser}`);
   
   try {
-    const response = await fetch(`${BASE_URL}/v1_0/apiuser/${apiUser}/apikey`, {
+    const url = `${BASE_URL}/v1_0/apiuser/${apiUser}/apikey`;
+    console.log(`[MTN] POST ${url}`);
+    
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Ocp-Apim-Subscription-Key': subscriptionKey,
       },
     });
 
+    console.log(`[MTN] Response status: ${response.status} ${response.statusText}`);
+
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`[MTN] Failed to create API Key:`, errorText);
-      throw new Error(`Failed to create API Key: ${response.status} - ${errorText}`);
+      console.error(`[MTN] Failed to create API Key. Status: ${response.status}, Body: "${errorText}"`);
+      throw new Error(`Failed to create API Key: ${response.status} - ${errorText || 'Empty response'}`);
     }
 
     const data = await response.json();
     console.log(`[MTN] ✓ API Key created successfully`);
     return data.apiKey;
   } catch (error) {
-    console.error(`[MTN] Exception creating API Key: `, error);
+    console.error(`[MTN] Exception creating API Key:`, error);
     throw error;
   }
 }
@@ -340,15 +357,22 @@ export async function requestToPay(
         'X-Target-Environment': MTN_ENV,
         'Ocp-Apim-Subscription-Key': subscriptionKey,
         'Content-Type': 'application/json',
-        .. .(callbackUrl ?  { 'X-Callback-Url': `${callbackUrl}/webhooks/mtn/collection` } : {}),
+        ...(callbackUrl ? { 'X-Callback-Url': `${callbackUrl}/webhooks/mtn/collection` } : {}),
       },
       body: JSON.stringify(requestBody),
     });
 
+    console.log(`[MTN] Request to Pay response status: ${response.status} ${response.statusText}`);
+    
+    // Log response headers for debugging
+    const headers: Record<string, string> = {};
+    response.headers.forEach((value, key) => { headers[key] = value; });
+    console.log(`[MTN] Response headers:`, JSON.stringify(headers));
+
     if (!response.ok && response.status !== 202) {
       const errorText = await response.text();
-      console.error(`[MTN] Request to Pay failed:  ${response.status}`, errorText);
-      throw new Error(`Request to Pay failed: ${response.status} - ${errorText}`);
+      console.error(`[MTN] Request to Pay failed. Status: ${response.status}, Body: "${errorText}"`);
+      throw new Error(`Request to Pay failed: ${response.status} - ${errorText || 'Empty response from MTN'}`);
     }
 
     console.log(`[MTN] ✓ Request to Pay sent successfully with referenceId: ${referenceId}`);
