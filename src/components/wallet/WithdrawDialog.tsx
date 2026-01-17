@@ -101,8 +101,7 @@ export const WithdrawDialog = ({ onWithdraw, maxAmount }: WithdrawDialogProps) =
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 className="pl-10"
-                min="100"
-                max={maxAmount}
+                min="1"
                 required
               />
             </div>
