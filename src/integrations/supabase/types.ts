@@ -892,7 +892,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      calculate_gain_distribution: {
+        Args: { _commission_rate?: number; _total_gain: number }
+        Returns: {
+          creator_commission: number
+          net_gain: number
+        }[]
+      }
       can_print_tickets: { Args: { _user_id: string }; Returns: boolean }
+      generate_verification_code: { Args: never; Returns: string }
       has_active_subscription: { Args: { _user_id: string }; Returns: boolean }
       has_role: {
         Args: {
