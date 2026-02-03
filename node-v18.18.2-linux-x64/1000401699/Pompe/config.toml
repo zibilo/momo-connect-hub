@@ -1,4 +1,0 @@
-project_id = "sfgncyerlcditfepasjo"
-
-[functions.analyze-plan]
-verify_jwt = false
